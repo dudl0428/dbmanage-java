@@ -1,6 +1,6 @@
 package com.dbmanage.api.controller;
 
-import com.dbmanage.api.service.UserDetailsImpl;
+import com.dbmanage.api.dto.UserDetailsImpl;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 

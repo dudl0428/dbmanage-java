@@ -1,8 +1,7 @@
 package com.dbmanage.api.security;
 
-import com.dbmanage.api.service.UserDetailsImpl;
+import com.dbmanage.api.dto.UserDetailsImpl;
 import io.jsonwebtoken.*;
-import io.jsonwebtoken.security.Keys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

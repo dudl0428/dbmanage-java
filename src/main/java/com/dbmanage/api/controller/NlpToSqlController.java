@@ -18,7 +18,7 @@ import java.util.Map;
 public class NlpToSqlController {
 
     @Autowired
-    private  NlpToSqlService nlpToSqlService;
+    private NlpToSqlService nlpToSqlService;
 
     /**
      * 将自然语言转换为SQL

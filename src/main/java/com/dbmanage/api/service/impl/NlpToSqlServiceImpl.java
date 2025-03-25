@@ -1,405 +1,346 @@
 package com.dbmanage.api.service.impl;
 
+import com.dbmanage.api.common.Constants;
+import com.dbmanage.api.config.AiProperties;
+import com.dbmanage.api.config.OpenAiProperties;
+import com.dbmanage.api.config.DeepSeekProperties;
 import com.dbmanage.api.service.DeepSeekService;
 import com.dbmanage.api.service.NlpToSqlService;
 import com.dbmanage.api.service.SqlFormatterService;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.dbmanage.api.util.MessageResolver;
 import com.theokanning.openai.completion.chat.ChatCompletionRequest;
+import com.theokanning.openai.completion.chat.ChatCompletionResult;
 import com.theokanning.openai.completion.chat.ChatMessage;
 import com.theokanning.openai.service.OpenAiService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.PostConstruct;
+import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
- * 增强型NLP到SQL服务实现类
- * 改进了数据库结构格式化逻辑，更好地处理表和字段注释
+ * AI模型服务实现类
+ * 处理自然语言转换为SQL
+ * 支持OpenAI和DeepSeek模型
  */
 @Service
-public class NlpToSqlServiceImpl extends NlpToSqlService {
+public class NlpToSqlServiceImpl implements NlpToSqlService {
 
     private static final Logger logger = LoggerFactory.getLogger(NlpToSqlServiceImpl.class);
     
-    /**
-     * 构造函数
-     */
-    public NlpToSqlServiceImpl(
-            @Value("${openai.api-key:}") String openaiApiKey,
-            @Value("${openai.model:gpt-3.5-turbo}") String openaiModel,
-            @Value("${openai.timeout-seconds:30}") int openaiTimeoutSeconds,
-            @Value("${openai.base-url:https://api.gptsapi.net/v1/}") String openaiBaseUrl,
-            @Value("${deepseek.api-key:}") String deepseekApiKey,
-            @Value("${deepseek.model:deepseek-chat}") String deepseekModel,
-            @Value("${deepseek.timeout-seconds:30}") int deepseekTimeoutSeconds,
-            SqlFormatterService sqlFormatterService) {
-        super(openaiApiKey, openaiModel, openaiTimeoutSeconds, openaiBaseUrl, deepseekApiKey, deepseekModel, deepseekTimeoutSeconds, sqlFormatterService);
+    @Autowired
+    private OpenAiProperties openAiProperties;
+    
+    @Autowired
+    private DeepSeekProperties deepSeekProperties;
+    
+    @Autowired
+    private AiProperties aiProperties;
+    
+    @Autowired
+    private DeepSeekService deepseekService;
+    
+    @Autowired
+    private SqlFormatterService sqlFormatterService;
+    
+    private OpenAiService openAiService;
+    
+    @PostConstruct
+    public void init() {
+        // 初始化OpenAI服务
+        this.openAiService = new OpenAiService(
+            openAiProperties.getApiKey(), 
+            Duration.ofSeconds(openAiProperties.getTimeoutSeconds())
+        );
+        
+        logger.info(
+            MessageResolver.format(Constants.LogMessages.INIT_SERVICE, 
+            openAiProperties.getModel(), 
+            deepSeekProperties.getModel())
+        );
     }
 
-    /**
-     * 重载生成SQL的方法，使用增强的结构格式化
-     * 
-     * @param naturalLanguageQuery 自然语言查询
-     * @param dialect SQL方言
-     * @param schemaInfo 数据库结构信息
-     * @param modelType 模型类型
-     * @return 生成的SQL
-     */
     @Override
     public String generateSql(String naturalLanguageQuery, String dialect, String schemaInfo, String modelType) {
+        // 准备聊天消息
+        List<ChatMessage> messages = new ArrayList<>();
+
+        // 系统消息，告诉AI它的角色和任务
+        messages.add(new ChatMessage(
+            Constants.AiModel.SYSTEM_ROLE, 
+            aiProperties.getSystemPrompts().get("sql-assistant")
+        ));
+
+        // 添加数据库结构信息，格式化结构以便AI更好理解
         if (schemaInfo != null && !schemaInfo.isEmpty()) {
-            // 使用增强的格式化方法处理schema信息
-            schemaInfo = enhancedFormatSchemaInfo(schemaInfo);
+            messages.add(new ChatMessage(
+                Constants.AiModel.SYSTEM_ROLE,
+                MessageResolver.format(Constants.PromptTemplates.SCHEMA_INFO_TEMPLATE, formatSchemaInfo(schemaInfo))
+            ));
         }
-        return super.generateSql(naturalLanguageQuery, dialect, schemaInfo, modelType);
+
+        // 用户查询，提供明确的任务说明
+        String sqlDialect = dialect != null ? dialect : Constants.Sql.DEFAULT_DIALECT;
+        messages.add(new ChatMessage(
+            Constants.AiModel.USER_ROLE,
+            MessageResolver.format(Constants.PromptTemplates.NL_TO_SQL_TEMPLATE, sqlDialect, naturalLanguageQuery)
+        ));
+
+        // 创建请求对象
+        String modelName = Constants.AiModel.DEEPSEEK.equalsIgnoreCase(modelType) 
+            ? deepSeekProperties.getModel() 
+            : openAiProperties.getModel();
+            
+        ChatCompletionRequest completionRequest = ChatCompletionRequest.builder()
+                .model(modelName)
+                .messages(messages)
+                .temperature(Constants.AiModel.DEFAULT_TEMPERATURE)
+                .maxTokens(Constants.AiModel.DEFAULT_MAX_TOKENS)
+                .build();
+
+        try {
+            String sqlResponse;
+
+            // 根据模型类型选择服务
+            if (Constants.AiModel.DEEPSEEK.equalsIgnoreCase(modelType)) {
+                sqlResponse = deepseekService.createChatCompletion(completionRequest);
+            } else {
+                ChatCompletionResult result = openAiService.createChatCompletion(completionRequest);
+                sqlResponse = result.getChoices().get(0).getMessage().getContent();
+            }
+
+            // 去除可能的```sql和```标记
+            sqlResponse = cleanupResponse(sqlResponse);
+
+            // 使用SQL格式化工具格式化SQL
+            return sqlFormatterService.formatSql(sqlResponse, 
+                dialect != null && !dialect.isEmpty() ? dialect : Constants.Sql.DEFAULT_DIALECT);
+                
+        } catch (Exception e) {
+            throw new RuntimeException(MessageResolver.format(Constants.ErrorMessages.GENERATE_SQL_ERROR, e.getMessage()), e);
+        }
     }
 
+    @Override
+    public String generateSql(String naturalLanguageQuery, String dialect, String schemaInfo) {
+        // 默认使用openai作为模型类型
+        return generateSql(naturalLanguageQuery, dialect, schemaInfo, Constants.AiModel.OPENAI);
+    }
+    
     /**
-     * 增强版数据库结构格式化方法，提供更好的表和字段注释处理
-     * 
-     * @param schemaInfo 原始的数据库结构信息JSON字符串
-     * @return 格式化后的文本
+     * 清理API响应，移除代码块标记
      */
-    private String enhancedFormatSchemaInfo(String schemaInfo) {
+    private String cleanupResponse(String input) {
+        if (input == null || input.isEmpty()) {
+            return "";
+        }
+        
+        // 去除Markdown代码块
+        Pattern pattern = Pattern.compile(Constants.AiModel.CODE_BLOCK_PATTERN, Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(input);
+        
+        if (matcher.find()) {
+            return matcher.group(1).trim();
+        }
+        
+        return input.trim();
+    }
+    
+    /**
+     * 格式化数据库结构信息，使其更易于AI理解
+     */
+    private String formatSchemaInfo(String schemaInfo) {
+        // 简单实现，实际应根据schemaInfo结构进行解析和格式化
+        return schemaInfo;
+    }
+
+    @Override
+    public List<String> getSqlCompletions(String partialSql, String dialect, String schemaInfo, String modelType) {
+        // 准备聊天消息
+        List<ChatMessage> messages = new ArrayList<>();
+
+        // 系统消息，告诉AI它的角色和任务
+        messages.add(new ChatMessage(
+            Constants.AiModel.SYSTEM_ROLE, 
+            aiProperties.getSystemPrompts().get("sql-assistant")
+        ));
+
+        // 添加数据库结构信息，格式化结构以便AI更好理解
+        if (schemaInfo != null && !schemaInfo.isEmpty()) {
+            messages.add(new ChatMessage(
+                Constants.AiModel.SYSTEM_ROLE,
+                MessageResolver.format(Constants.PromptTemplates.SCHEMA_INFO_TEMPLATE, formatSchemaInfo(schemaInfo))
+            ));
+        }
+
+        // 用户查询，提供明确的任务说明
+        String sqlDialect = dialect != null ? dialect : Constants.Sql.DEFAULT_DIALECT;
+        messages.add(new ChatMessage(
+            Constants.AiModel.USER_ROLE,
+            MessageResolver.format(Constants.PromptTemplates.SQL_COMPLETIONS_TEMPLATE, sqlDialect, partialSql)
+        ));
+
+        // 创建请求对象
+        String modelName = Constants.AiModel.DEEPSEEK.equalsIgnoreCase(modelType) 
+            ? deepSeekProperties.getModel() 
+            : openAiProperties.getModel();
+            
+        ChatCompletionRequest completionRequest = ChatCompletionRequest.builder()
+                .model(modelName)
+                .messages(messages)
+                .temperature(Constants.AiModel.CREATIVE_TEMPERATURE) // 适当提高温度以获得多样化的建议
+                .maxTokens(Constants.AiModel.DEFAULT_MAX_TOKENS)
+                .build();
+
         try {
-            // 尝试将JSON字符串转换为Map对象进行处理
-            ObjectMapper mapper = new ObjectMapper();
-            Map<String, Object> schemaMap;
-            
-            try {
-                // 尝试解析JSON
-                schemaMap = mapper.readValue(schemaInfo, new TypeReference<Map<String, Object>>() {});
-            } catch (Exception e) {
-                logger.warn("无法解析schema JSON，尝试使用字符串处理: {}", e.getMessage());
-                return enhancedFormatSchemaInfoWithStringProcessing(schemaInfo);
-            }
-            
-            StringBuilder sb = new StringBuilder();
-            
-            // 添加数据库名称和类型信息
-            String databaseType = (String) schemaMap.getOrDefault("databaseType", "未知类型");
-            String database = (String) schemaMap.getOrDefault("database", "未知数据库");
-            
-            sb.append("数据库信息:\n");
-            sb.append("- 数据库名称: ").append(database).append("\n");
-            sb.append("- 数据库类型: ").append(databaseType).append("\n\n");
-            
-            // 处理表信息
-            List<Map<String, Object>> tables = (List<Map<String, Object>>) schemaMap.get("tables");
-            if (tables != null && !tables.isEmpty()) {
-                sb.append("数据库包含以下表:\n\n");
-                
-                // 首先收集所有表的主键信息，用于后续分析表间关系
-                Map<String, List<String>> tablePrimaryKeys = new HashMap<>();
-                Map<String, String> tableComments = new HashMap<>();
-                
-                for (Map<String, Object> table : tables) {
-                    String tableName = (String) table.get("name");
-                    List<Map<String, Object>> columns = (List<Map<String, Object>>) table.get("columns");
-                    List<String> primaryKeys = new ArrayList<>();
-                    
-                    if (columns != null) {
-                        for (Map<String, Object> column : columns) {
-                            Object isPrimaryKeyObj = column.getOrDefault("isPrimaryKey", false);
-                            boolean isPrimaryKey = false;
-                            
-                            if (isPrimaryKeyObj instanceof Boolean) {
-                                isPrimaryKey = (Boolean) isPrimaryKeyObj;
-                            } else if (isPrimaryKeyObj instanceof String) {
-                                isPrimaryKey = "true".equalsIgnoreCase((String) isPrimaryKeyObj) || 
-                                              "PRI".equalsIgnoreCase((String) isPrimaryKeyObj);
-                            }
-                            
-                            if (isPrimaryKey) {
-                                primaryKeys.add((String) column.get("name"));
-                            }
-                        }
-                    }
-                    
-                    tablePrimaryKeys.put(tableName, primaryKeys);
-                    tableComments.put(tableName, (String) table.getOrDefault("comment", ""));
-                }
-                
-                // 然后详细输出每个表的信息
-                for (Map<String, Object> table : tables) {
-                    String tableName = (String) table.get("name");
-                    String tableComment = (String) table.getOrDefault("comment", "");
-                    
-                    // 添加表名和注释
-                    sb.append("表英文名: ").append(tableName);
-                    if (tableComment != null && !tableComment.trim().isEmpty()) {
-                        sb.append("\n表中文名: ").append(tableComment);
-                    }
-                    sb.append("\n");
-                    
-                    // 添加主键信息
-                    List<String> primaryKeys = tablePrimaryKeys.get(tableName);
-                    if (primaryKeys != null && !primaryKeys.isEmpty()) {
-                        sb.append("主键: ").append(String.join(", ", primaryKeys)).append("\n");
-                    }
-                    
-                    // 识别可能的外键关系
-                    List<String> possibleRelations = new ArrayList<>();
-                    List<Map<String, Object>> columns = (List<Map<String, Object>>) table.get("columns");
-                    
-                    if (columns != null) {
-                        for (Map<String, Object> column : columns) {
-                            String columnName = (String) column.get("name");
-                            
-                            // 检测常见的外键命名模式
-                            if (columnName.toLowerCase().endsWith("_id") || columnName.toLowerCase().startsWith("id_") || 
-                                columnName.equalsIgnoreCase("parent_id") || columnName.equalsIgnoreCase("parent")) {
-                                
-                                // 尝试从列名中提取可能的关联表名
-                                String possibleTableName = null;
-                                if (columnName.toLowerCase().endsWith("_id")) {
-                                    possibleTableName = columnName.substring(0, columnName.length() - 3);
-                                } else if (columnName.toLowerCase().startsWith("id_")) {
-                                    possibleTableName = columnName.substring(3);
-                                }
-                                
-                                // 如果找到可能的表名，检查它是否存在
-                                if (possibleTableName != null && tablePrimaryKeys.containsKey(possibleTableName)) {
-                                    String relatedTableComment = tableComments.get(possibleTableName);
-                                    possibleRelations.add(columnName + " -> " + possibleTableName + 
-                                                         (relatedTableComment != null && !relatedTableComment.isEmpty() ? 
-                                                          " (" + relatedTableComment + ")" : ""));
-                                }
-                            }
-                        }
-                    }
-                    
-                    // 添加可能的表关系信息
-                    if (!possibleRelations.isEmpty()) {
-                        sb.append("可能的表关系:\n");
-                        for (String relation : possibleRelations) {
-                            sb.append("  - ").append(relation).append("\n");
-                        }
-                    }
-                    
-                    // 添加表的列信息
-                    if (columns != null && !columns.isEmpty()) {
-                        sb.append("列信息:\n");
-                        
-                        for (Map<String, Object> column : columns) {
-                            String columnName = (String) column.get("name");
-                            String columnType = (String) column.get("type");
-                            String columnComment = (String) column.getOrDefault("comment", "");
-                            Object nullableObj = column.get("nullable");
-                            Object isPrimaryKeyObj = column.getOrDefault("isPrimaryKey", false);
-                            
-                            // 处理nullable字段可能是Boolean或String类型的情况
-                            boolean nullable = true;
-                            if (nullableObj instanceof Boolean) {
-                                nullable = (Boolean) nullableObj;
-                            } else if (nullableObj instanceof String) {
-                                nullable = "true".equalsIgnoreCase((String) nullableObj) || 
-                                           "yes".equalsIgnoreCase((String) nullableObj);
-                            }
-                            
-                            // 处理isPrimaryKey字段可能是Boolean或String类型的情况
-                            boolean isPrimaryKey = false;
-                            if (isPrimaryKeyObj instanceof Boolean) {
-                                isPrimaryKey = (Boolean) isPrimaryKeyObj;
-                            } else if (isPrimaryKeyObj instanceof String) {
-                                isPrimaryKey = "true".equalsIgnoreCase((String) isPrimaryKeyObj) || 
-                                               "PRI".equalsIgnoreCase((String) isPrimaryKeyObj);
-                            }
-                            
-                            // 构建字段信息
-                            sb.append("  - ").append(columnName).append(" (类型: ").append(columnType);
-                            
-                            // 添加主键、非空等约束信息
-                            if (isPrimaryKey) {
-                                sb.append(", 主键");
-                            }
-                            if (!nullable) {
-                                sb.append(", NOT NULL");
-                            }
-                            
-                            // 添加列注释
-                            if (columnComment != null && !columnComment.trim().isEmpty()) {
-                                sb.append(", 说明: ").append(columnComment);
-                            }
-                            
-                            sb.append(")\n");
-                        }
-                    }
-                    
-                    // 添加分隔符
-                    sb.append("\n");
-                }
-                
-                // 添加表间关系的概览
-                sb.append("表间关系概览:\n");
-                for (Map<String, Object> table : tables) {
-                    String tableName = (String) table.get("name");
-                    List<Map<String, Object>> columns = (List<Map<String, Object>>) table.get("columns");
-                    
-                    if (columns != null) {
-                        for (Map<String, Object> column : columns) {
-                            String columnName = (String) column.get("name");
-                            
-                            // 检测常见的外键命名模式
-                            if (columnName.toLowerCase().endsWith("_id") || columnName.toLowerCase().endsWith("id")) {
-                                String baseTableName = tableName;
-                                String baseTableComment = tableComments.get(tableName);
-                                
-                                // 尝试从列名中提取可能的关联表名
-                                String possibleTableName = null;
-                                if (columnName.toLowerCase().endsWith("_id")) {
-                                    possibleTableName = columnName.substring(0, columnName.length() - 3);
-                                }
-                                
-                                // 如果找到可能的表名，检查它是否存在
-                                if (possibleTableName != null && tablePrimaryKeys.containsKey(possibleTableName)) {
-                                    String relatedTableComment = tableComments.get(possibleTableName);
-                                    sb.append("  - ").append(baseTableName);
-                                    if (baseTableComment != null && !baseTableComment.isEmpty()) {
-                                        sb.append(" (").append(baseTableComment).append(")");
-                                    }
-                                    sb.append(" 通过字段 ").append(columnName).append(" 关联到 ")
-                                      .append(possibleTableName);
-                                    if (relatedTableComment != null && !relatedTableComment.isEmpty()) {
-                                        sb.append(" (").append(relatedTableComment).append(")");
-                                    }
-                                    sb.append("\n");
-                                }
-                            }
-                        }
-                    }
-                }
+            String response;
+
+            // 根据模型类型选择服务
+            if (Constants.AiModel.DEEPSEEK.equalsIgnoreCase(modelType)) {
+                response = deepseekService.createChatCompletion(completionRequest);
             } else {
-                sb.append("未找到表结构信息\n");
+                ChatCompletionResult result = openAiService.createChatCompletion(completionRequest);
+                response = result.getChoices().get(0).getMessage().getContent();
             }
-            
-            return sb.toString();
-        } catch (Exception e) {
-            logger.error("格式化数据库结构失败: {}", e.getMessage(), e);
-            // 如果使用Jackson处理失败，回退到字符串处理方法
-            return enhancedFormatSchemaInfoWithStringProcessing(schemaInfo);
-        }
-    }
-    
-    /**
-     * 使用字符串处理的方式格式化数据库结构信息（兼容旧格式）
-     */
-    private String enhancedFormatSchemaInfoWithStringProcessing(String schemaInfo) {
-        try {
-            StringBuilder builder = new StringBuilder();
-            
-            // 1. 数据库基本信息
-            if (schemaInfo.contains("databaseType")) {
-                String dbType = extractValue(schemaInfo, "databaseType");
-                String dbName = extractValue(schemaInfo, "database");
-                builder.append("数据库类型: ").append(dbType).append("\n");
-                builder.append("数据库名称: ").append(dbName).append("\n\n");
-            }
-            
-            // 2. 表信息
-            builder.append("数据库包含以下表：\n\n");
-            
-            // 使用简单的方法提取tables数组
-            int tablesStart = schemaInfo.indexOf("\"tables\"");
-            if (tablesStart > 0) {
-                // 表信息处理
-                String[] tableParts = schemaInfo.substring(tablesStart).split("\\{\"name\":");
+
+            // 解析响应为多行
+            List<String> completions = new ArrayList<>();
+            if (response != null && !response.trim().isEmpty()) {
+                // 清理可能存在的代码块标记
+                response = cleanupResponse(response);
                 
-                for (int i = 1; i < tableParts.length; i++) {
-                    String tablePart = tableParts[i];
-                    String tableName = extractValue(tablePart, "name");
-                    String tableComment = extractValue(tablePart, "comment");
-                    
-                    builder.append("表英文名: ").append(tableName);
-                    if (tableComment != null && !tableComment.isEmpty()) {
-                        builder.append("\n表中文名: ").append(tableComment);
+                // 按行分割
+                String[] lines = response.split("\\n");
+                for (String line : lines) {
+                    String trimmed = line.trim();
+                    if (!trimmed.isEmpty()) {
+                        completions.add(trimmed);
                     }
-                    builder.append("\n");
-                    
-                    // 提取字段信息
-                    builder.append("字段列表:\n");
-                    
-                    int columnsStart = tablePart.indexOf("\"columns\"");
-                    if (columnsStart > 0) {
-                        String columnsJson = tablePart.substring(columnsStart);
-                        // 简单提取字段信息，实际情况可能更复杂
-                        String[] columnParts = columnsJson.split("\\{");
-                        for (int j = 1; j < columnParts.length; j++) {
-                            if (columnParts[j].contains("name")) {
-                                String columnName = extractValue(columnParts[j], "name");
-                                String columnType = extractValue(columnParts[j], "type");
-                                String columnComment = extractValue(columnParts[j], "comment");
-                                String nullable = extractValue(columnParts[j], "nullable");
-                                String isPrimary = extractValue(columnParts[j], "isPrimaryKey");
-                                
-                                builder.append("  - ").append(columnName).append(" (类型: ").append(columnType);
-                                
-                                if ("true".equalsIgnoreCase(isPrimary) || "PRI".equalsIgnoreCase(isPrimary)) {
-                                    builder.append(", 主键");
-                                }
-                                
-                                if ("false".equalsIgnoreCase(nullable)) {
-                                    builder.append(", NOT NULL");
-                                }
-                                
-                                if (columnComment != null && !columnComment.isEmpty()) {
-                                    builder.append(", 说明: ").append(columnComment);
-                                }
-                                
-                                builder.append(")\n");
-                            }
-                        }
-                    }
-                    
-                    builder.append("\n");
                 }
             }
             
-            return builder.toString();
+            logger.info(MessageResolver.format(Constants.LogMessages.COMPLETIONS_GENERATED, partialSql, completions.size()));
+            return completions;
         } catch (Exception e) {
-            // 处理异常时返回原始信息
-            logger.error("格式化数据库结构失败(字符串处理): {}", e.getMessage(), e);
-            return schemaInfo;
+            logger.error(Constants.ErrorMessages.SQL_COMPLETIONS_ERROR, e);
+            return new ArrayList<>();
         }
     }
-    
-    /**
-     * 从JSON片段中提取键值对
-     */
-    private String extractValue(String json, String key) {
-        int keyStart = json.indexOf("\"" + key + "\"");
-        if (keyStart < 0) return "";
-        
-        int valueStart = json.indexOf(":", keyStart) + 1;
-        while (valueStart < json.length() && Character.isWhitespace(json.charAt(valueStart))) {
-            valueStart++;
+
+    @Override
+    public List<String> getSqlCompletions(String partialSql, String dialect, String schemaInfo) {
+        // 默认使用openai作为模型类型
+        return getSqlCompletions(partialSql, dialect, schemaInfo, Constants.AiModel.OPENAI);
+    }
+
+    @Override
+    public List<Map<String, String>> getSqlExamples(String dialect, String schemaInfo, String modelType) {
+        // 准备聊天消息
+        List<ChatMessage> messages = new ArrayList<>();
+
+        // 系统消息，告诉AI它的角色和任务
+        messages.add(new ChatMessage(
+            Constants.AiModel.SYSTEM_ROLE, 
+            aiProperties.getSystemPrompts().get("sql-assistant")
+        ));
+
+        // 添加数据库结构信息，格式化结构以便AI更好理解
+        if (schemaInfo != null && !schemaInfo.isEmpty()) {
+            messages.add(new ChatMessage(
+                Constants.AiModel.SYSTEM_ROLE,
+                MessageResolver.format(Constants.PromptTemplates.SCHEMA_INFO_TEMPLATE, formatSchemaInfo(schemaInfo))
+            ));
         }
-        
-        if (valueStart >= json.length()) return "";
-        
-        char firstChar = json.charAt(valueStart);
-        if (firstChar == '"') {
-            // 字符串值
-            int valueEnd = json.indexOf("\"", valueStart + 1);
-            if (valueEnd > valueStart) {
-                return json.substring(valueStart + 1, valueEnd);
+
+        // 用户查询，提供明确的任务说明
+        String sqlDialect = dialect != null ? dialect : Constants.Sql.DEFAULT_DIALECT;
+        messages.add(new ChatMessage(
+            Constants.AiModel.USER_ROLE,
+            MessageResolver.format(Constants.PromptTemplates.SQL_EXAMPLES_TEMPLATE, sqlDialect)
+        ));
+
+        // 创建请求对象
+        String modelName = Constants.AiModel.DEEPSEEK.equalsIgnoreCase(modelType) 
+            ? deepSeekProperties.getModel() 
+            : openAiProperties.getModel();
+            
+        ChatCompletionRequest completionRequest = ChatCompletionRequest.builder()
+                .model(modelName)
+                .messages(messages)
+                .temperature(Constants.AiModel.CREATIVE_TEMPERATURE) // 适当提高温度以获得多样化的示例
+                .maxTokens(Constants.AiModel.DEFAULT_MAX_TOKENS)
+                .build();
+
+        try {
+            String response;
+
+            // 根据模型类型选择服务
+            if (Constants.AiModel.DEEPSEEK.equalsIgnoreCase(modelType)) {
+                response = deepseekService.createChatCompletion(completionRequest);
+            } else {
+                ChatCompletionResult result = openAiService.createChatCompletion(completionRequest);
+                response = result.getChoices().get(0).getMessage().getContent();
             }
-        } else if (firstChar == 't' || firstChar == 'f' || Character.isDigit(firstChar) || firstChar == '-') {
-            // 布尔值或数字
-            int valueEnd = json.indexOf(",", valueStart);
-            if (valueEnd < 0) valueEnd = json.indexOf("}", valueStart);
-            if (valueEnd > valueStart) {
-                return json.substring(valueStart, valueEnd).trim();
+
+            // 解析JSON响应
+            List<Map<String, String>> examples = new ArrayList<>();
+            if (response != null && !response.trim().isEmpty()) {
+                // 清理可能存在的代码块和其他格式
+                response = cleanupResponse(response);
+                
+                try {
+                    // 如果响应不是标准JSON，尝试提取JSON部分
+                    if (!response.trim().startsWith("[")) {
+                        Pattern jsonPattern = Pattern.compile(Constants.AiModel.JSON_ARRAY_PATTERN, Pattern.DOTALL);
+                        Matcher matcher = jsonPattern.matcher(response);
+                        if (matcher.find()) {
+                            response = matcher.group(0);
+                        }
+                    }
+                    
+                    // 使用Jackson解析JSON
+                    examples = new ObjectMapper().readValue(
+                        response, 
+                        new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, String>>>() {}
+                    );
+                    
+                    // 确保每个示例都包含description和sql字段
+                    examples = examples.stream()
+                        .filter(map -> map.containsKey("description") && map.containsKey("sql"))
+                        .peek(map -> map.put("sql", sqlFormatterService.formatSql(map.get("sql"), sqlDialect)))
+                        .collect(Collectors.toList());
+                } catch (Exception e) {
+                    logger.error(Constants.ErrorMessages.PARSE_JSON_ERROR, e);
+                    // 如果JSON解析失败，返回空列表
+                    return new ArrayList<>();
+                }
             }
+            
+            logger.info(MessageResolver.format(Constants.LogMessages.EXAMPLES_GENERATED, sqlDialect, examples.size()));
+            return examples;
+        } catch (Exception e) {
+            logger.error(Constants.ErrorMessages.SQL_EXAMPLES_ERROR, e);
+            return new ArrayList<>();
         }
-        
-        return "";
+    }
+
+    @Override
+    public List<Map<String, String>> getSqlExamples(String dialect, String schemaInfo) {
+        // 默认使用openai作为模型类型
+        return getSqlExamples(dialect, schemaInfo, Constants.AiModel.OPENAI);
     }
 }
- 

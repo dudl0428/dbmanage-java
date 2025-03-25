@@ -7,7 +7,7 @@ import java.util.Map;
  * 创建表请求实体类
  */
 public class CreateTableRequest {
-    private String connectionId;
+    private Long connectionId;
     private String databaseName;
     private String tableName;
     private String databaseType;
@@ -18,11 +18,11 @@ public class CreateTableRequest {
     private Map<String, String> options;
     private String comment;
     
-    public String getConnectionId() {
+    public Long getConnectionId() {
         return connectionId;
     }
     
-    public void setConnectionId(String connectionId) {
+    public void setConnectionId(Long connectionId) {
         this.connectionId = connectionId;
     }
     

@@ -2,13 +2,13 @@ package com.dbmanage.api.controller;
 
 import com.dbmanage.api.common.ApiResponse;
 import com.dbmanage.api.common.BaseController;
+import com.dbmanage.api.dto.UserDetailsImpl;
 import com.dbmanage.api.dto.auth.AuthResponse;
 import com.dbmanage.api.dto.auth.LoginRequest;
 import com.dbmanage.api.dto.auth.RegisterRequest;
 import com.dbmanage.api.model.User;
 import com.dbmanage.api.repository.UserRepository;
 import com.dbmanage.api.security.JwtUtils;
-import com.dbmanage.api.service.UserDetailsImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -19,14 +19,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
-import java.util.HashSet;
-import java.util.Set;
 
 /**
  * 认证控制器
  * 处理用户注册和登录请求
  */
-@CrossOrigin(origins = "http://localhost:5173", maxAge = 3600)
 @RestController
 @RequestMapping("/auth")
 public class AuthController extends BaseController {

@@ -6,7 +6,7 @@ package com.dbmanage.api.dto;
 public class ValidateFieldRequest {
     private FieldDefinition field;
     private String databaseType;
-    private String connectionId;
+    private Long connectionId;
     
     public FieldDefinition getField() {
         return field;
@@ -24,11 +24,11 @@ public class ValidateFieldRequest {
         this.databaseType = databaseType;
     }
     
-    public String getConnectionId() {
+    public Long getConnectionId() {
         return connectionId;
     }
     
-    public void setConnectionId(String connectionId) {
+    public void setConnectionId(Long connectionId) {
         this.connectionId = connectionId;
     }
     

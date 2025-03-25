@@ -1,5 +1,6 @@
 package com.dbmanage.api.service;
 
+import com.dbmanage.api.service.impl.NlpToSqlService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;

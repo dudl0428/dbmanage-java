@@ -95,6 +95,7 @@ public class ConnectionApiController extends BaseController {
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);
         result.put("message", "连接已关闭");
+        connectionService.cacheConnection(id);
         return success(result);
     }
     

@@ -1,4 +1,4 @@
-package com.dbmanage.api.service;
+package com.dbmanage.api.dto;
 
 import com.dbmanage.api.model.User;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -48,7 +48,7 @@ public class UserDetailsImpl implements UserDetails {
      * 构造函数
      */
     public UserDetailsImpl(Long id, String username, String email, String password,
-                          Collection<? extends GrantedAuthority> authorities) {
+                           Collection<? extends GrantedAuthority> authorities) {
         this.id = id;
         this.username = username;
         this.email = email;

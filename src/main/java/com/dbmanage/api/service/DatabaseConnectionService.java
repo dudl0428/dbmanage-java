@@ -10,6 +10,7 @@ import java.util.Map;
 
 /**
  * 数据库连接服务接口
+ * 提供数据库连接的创建、更新、查询、删除等操作
  */
 public interface DatabaseConnectionService {
     
@@ -67,4 +68,10 @@ public interface DatabaseConnectionService {
      * @return 连接结果
      */
     Map<String, Object> openConnection(Long userId, Long connectionId);
+
+    /**
+     * 缓存连接信息
+     * @param id 连接ID
+     */
+    void cacheConnection(Long id);
 } 

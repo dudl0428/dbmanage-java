@@ -6,10 +6,12 @@ import com.dbmanage.api.dto.ValidateFieldRequest;
 import com.dbmanage.api.exception.ValidationException;
 import com.dbmanage.api.service.DatabaseTypeService;
 import com.dbmanage.api.service.TableService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import javax.annotation.Resource;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
@@ -18,13 +20,11 @@ import java.util.Map;
 @RestController
 @RequestMapping("/table")
 public class TableController {
-    private final TableService tableService;
-    private final DatabaseTypeService databaseTypeService;
-    
-    public TableController(TableService tableService, DatabaseTypeService databaseTypeService) {
-        this.tableService = tableService;
-        this.databaseTypeService = databaseTypeService;
-    }
+    @Resource
+    private  TableService tableService;
+    @Resource
+    private  DatabaseTypeService databaseTypeService;
+
     
     @PostMapping("/validate-field")
     public ResponseEntity<ApiResponse<Void>> validateField(@RequestBody ValidateFieldRequest request) {
@@ -96,8 +96,6 @@ public class TableController {
             return ResponseEntity.ok(ApiResponse.success());
         } catch (ValidationException e) {
             return ResponseEntity.badRequest().body(ApiResponse.error(e.getMessage(), e.getField()));
-        } catch (SQLException e) {
-            return ResponseEntity.badRequest().body(ApiResponse.error(e.getMessage()));
         } catch (Exception e) {
             return ResponseEntity.internalServerError().body(
                 ApiResponse.error(500, "创建表发生未预期错误: " + e.getMessage())

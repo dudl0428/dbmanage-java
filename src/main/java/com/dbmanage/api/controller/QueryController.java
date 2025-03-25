@@ -19,7 +19,6 @@ import java.util.Map;
 /**
  * 查询控制器
  */
-@CrossOrigin(origins = "http://localhost:5173", maxAge = 3600)
 @RestController
 @RequestMapping("/query")
 public class QueryController extends BaseController {

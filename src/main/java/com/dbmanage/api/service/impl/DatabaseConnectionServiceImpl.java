@@ -263,7 +263,7 @@ public class DatabaseConnectionServiceImpl implements DatabaseConnectionService 
                     connection.getUsername(), 
                     connection.getPassword()
             );
-            
+            connectionService.cacheConnection(connectionId, connection);
             // 更新最后连接时间
             connection.setLastConnected(new Date());
             connectionRepository.save(connection);
@@ -291,7 +291,12 @@ public class DatabaseConnectionServiceImpl implements DatabaseConnectionService 
         
         return result;
     }
-    
+
+    @Override
+    public void cacheConnection(Long id) {
+        connectionService.removeConnection(id);
+    }
+
     /**
      * 生成JDBC URL
      * @param connection 数据库连接

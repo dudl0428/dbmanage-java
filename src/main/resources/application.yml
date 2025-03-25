@@ -36,6 +36,47 @@ app:
   jwt:
     secret: dudl2025SecretKeyForJwtTokenGenerationWith256BitsLength12345678901234567890
     expiration: 86400000 # 24小时
+  # 跨域配置
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+      - http://localhost:3000
+    max-age: 3600
+  # 错误消息配置
+  error-messages:
+    deepseek:
+      extract-content-failed: "无法从DeepSeek API响应中提取内容"
+    connection:
+      name-exists: "连接名 {0} 已存在"
+      group-not-found: "未找到ID为 {0} 的用户 {1} 的连接组"
+      group-name-exists: "分组名 {0} 已存在"
+      connection-not-in-group: "连接不在指定分组中"
+    validation:
+      field-empty: "字段信息不能为空"
+      field-name-empty: "字段名不能为空"
+      field-name-format: "字段名只能包含字母、数字和下划线，且不能以数字开头"
+      field-type-empty: "字段类型不能为空"
+      field-type-not-supported: "不支持的数据类型: {0}"
+      field-length-positive: "字段长度必须大于0"
+      field-length-max: "字段长度不能超过 {0}"
+      field-decimal-negative: "小数位数不能为负数"
+      field-decimal-max: "小数位数不能超过 {0}"
+      field-decimal-length: "小数位数不能大于或等于总长度"
+      field-auto-increment: "数据类型 {0} 不支持自增"
+      request-empty: "请求不能为空"
+      table-name-empty: "表名不能为空"
+      table-name-format: "表名只能包含字母、数字和下划线，且不能以数字开头"
+      fields-min: "至少需要一个字段"
+      field-duplicate: "字段名 '{0}' 重复"
+      index-name-empty: "索引名不能为空"
+      index-fields-min: "索引 '{0}' 必须包含至少一个字段"
+      index-field-not-exist: "索引 '{0}' 引用了不存在的字段 '{1}'"
+      foreign-key-name-empty: "外键名不能为空"
+      foreign-key-src-fields-min: "外键 '{0}' 必须包含至少一个源字段"
+      foreign-key-ref-table-empty: "外键 '{0}' 必须指定引用表"
+      foreign-key-ref-fields-min: "外键 '{0}' 必须包含至少一个引用字段"
+      foreign-key-field-not-exist: "外键 '{0}' 引用了不存在的源字段 '{1}'"
+      foreign-key-field-count: "外键 '{0}' 源字段和引用字段数量不匹配"
 
 # OpenAI配置
 openai:
@@ -48,7 +89,15 @@ openai:
 deepseek:
   api-key: sk-9b51d5ad15bd432fb1e199c2cc665955
   model: deepseek-chat
+  base-url: https://api.deepseek.com
+  chat-url: ${deepseek.base-url}/v1/chat/completions
   timeout-seconds: 30
+
+# AI模型提示配置
+ai:
+  system-prompts:
+    sql-assistant: "你是一个专业的数据库SQL转换专家，能够将自然语言准确地转换为高质量的SQL查询语句。"
+    test-prompt: "你是SQL助手"
 
 logging:
   level:
