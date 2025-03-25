@@ -1,0 +1,58 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: ai-dbmanage
+  datasource:
+    url: jdbc:postgresql://localhost:5433/ai_dbmanage
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  main:
+    allow-bean-definition-overriding: true
+
+# JWT配置
+app:
+  jwt:
+    secret: dudl2025SecretKeyForJwtTokenGenerationWith256BitsLength12345678901234567890
+    expiration: 86400000 # 24小时
+
+# OpenAI配置
+openai:
+  api-key: sk-mfC1f6bc5d22498527ffb3e42ba5f12ecd8f36db491Z1sz9
+  base-url: https://api.gptsapi.net/v1
+  model: gpt-3.5-turbo
+  timeout-seconds: 30
+
+# DeepSeek配置
+deepseek:
+  api-key: sk-9b51d5ad15bd432fb1e199c2cc665955
+  model: deepseek-chat
+  timeout-seconds: 30
+
+logging:
+  level:
+    org.springframework: WARN
+    org.springframework.security: DEBUG
+    com.dbmanage: INFO
+    com.dbmanage.api: DEBUG 
