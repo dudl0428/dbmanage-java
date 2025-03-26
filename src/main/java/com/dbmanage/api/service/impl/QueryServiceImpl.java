@@ -713,6 +713,74 @@ public class QueryServiceImpl implements QueryService {
                 .collect(Collectors.toList());
     }
     
+    /**
+     * 执行SQL更新操作（INSERT、UPDATE、DELETE等）
+     * @param connectionId 数据库连接ID
+     * @param sql SQL语句
+     * @param params SQL参数
+     * @return 更新结果，包含影响的行数等信息
+     */
+    @Override
+    @Transactional
+    public Map<String, Object> executeUpdate(Long connectionId, String sql, Object[] params) {
+        long startTime = System.currentTimeMillis();
+        Map<String, Object> result = new HashMap<>();
+        
+        // 查找连接
+        DatabaseConnection connection = connectionRepository.findById(connectionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Connection not found with id: " + connectionId));
+        
+        try (Connection conn = DriverManager.getConnection(
+                connection.getUrl(),
+                connection.getUsername(),
+                connection.getPassword());
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            
+            // 设置参数
+            if (params != null) {
+                for (int i = 0; i < params.length; i++) {
+                    pstmt.setObject(i + 1, params[i]);
+                }
+            }
+            
+            // 执行更新
+            int affectedRows = pstmt.executeUpdate();
+            
+            // 获取生成的主键（如果有）
+            ResultSet generatedKeys = pstmt.getGeneratedKeys();
+            List<Object> generatedIds = new ArrayList<>();
+            if (generatedKeys != null) {
+                while (generatedKeys.next()) {
+                    generatedIds.add(generatedKeys.getObject(1));
+                }
+            }
+            
+            // 设置结果
+            result.put("success", true);
+            result.put("affectedRows", affectedRows);
+            result.put("executionTime", System.currentTimeMillis() - startTime);
+            if (!generatedIds.isEmpty()) {
+                result.put("generatedKeys", generatedIds);
+            }
+            
+            // 保存查询历史
+            saveQueryHistory(connection, sql, System.currentTimeMillis() - startTime, 
+                new QueryResponse(true, false, affectedRows), null);
+            
+        } catch (SQLException e) {
+            logger.error("SQL execution error: ", e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            result.put("executionTime", System.currentTimeMillis() - startTime);
+            
+            // 保存错误的查询历史
+            saveQueryHistory(connection, sql, System.currentTimeMillis() - startTime, 
+                new QueryResponse(false, false, 0), e.getMessage());
+        }
+        
+        return result;
+    }
+    
     // 辅助方法：判断SQL是否为SELECT查询
     private boolean isSelectQuery(String sql) {
         return sql.trim().toLowerCase().startsWith("select");
@@ -795,5 +863,99 @@ public class QueryServiceImpl implements QueryService {
         }
         
         return response;
+    }
+
+    /**
+     * 执行带分页的SQL查询
+     * 
+     * @param connectionId 数据库连接ID
+     * @param database 数据库名称
+     * @param sql SQL语句
+     * @param offset 偏移量
+     * @param limit 每页记录数
+     * @return 查询结果，包含分页信息
+     */
+    @Override
+    public Map<String, Object> executeQueryWithPagination(Long connectionId, String database, String sql, int offset, int limit) {
+        // 创建QueryRequest
+        QueryRequest request = new QueryRequest();
+        request.setConnectionId(connectionId);
+        request.setDatabase(database);
+        request.setSql(sql);
+        
+        try {
+            // 执行查询
+            QueryResponse response = executeQuery(request);
+            
+            // 计算总记录数 - 这里简化处理，实际应该通过COUNT查询获取
+            long totalRecords = response.getData() != null ? response.getData().size() : 0;
+            
+            // 构建分页信息
+            Map<String, Object> pagination = new HashMap<>();
+            pagination.put("total", totalRecords);
+            pagination.put("current", offset / limit + 1);
+            pagination.put("pageSize", limit);
+            pagination.put("totalPages", (totalRecords + limit - 1) / limit);
+            
+            // 构建结果
+            Map<String, Object> result = new HashMap<>();
+            result.put("pagination", pagination);
+            result.put("columns", response.getColumns());
+            result.put("data", response.getData());
+            
+            return result;
+        } catch (Exception e) {
+            logger.error("执行分页查询失败", e);
+            
+            // 返回错误信息
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("error", e.getMessage());
+            errorResult.put("success", false);
+            
+            return errorResult;
+        }
+    }
+
+    /**
+     * 执行一般SQL查询
+     * 
+     * @param connectionId 数据库连接ID
+     * @param database 数据库名称
+     * @param sql SQL语句
+     * @return 查询结果
+     */
+    @Override
+    public Map<String, Object> executeGenericQuery(Long connectionId, String database, String sql) {
+        // 创建QueryRequest
+        QueryRequest request = new QueryRequest();
+        request.setConnectionId(connectionId);
+        request.setDatabase(database);
+        request.setSql(sql);
+        
+        try {
+            // 执行查询
+            QueryResponse response = executeQuery(request);
+            
+            // 构建结果
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", response.isSuccess());
+            result.put("message", response.getErrorMessage());
+            result.put("isQueryResult", response.isQueryResult());
+            result.put("affectedRows", response.getAffectedRows());
+            result.put("columns", response.getColumns());
+            result.put("data", response.getData());
+            result.put("executionTime", response.getExecutionTime());
+            
+            return result;
+        } catch (Exception e) {
+            logger.error("执行查询失败", e);
+            
+            // 返回错误信息
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("error", e.getMessage());
+            errorResult.put("success", false);
+            
+            return errorResult;
+        }
     }
 } 

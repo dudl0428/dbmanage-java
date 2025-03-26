@@ -43,6 +43,24 @@ public class QueryResponse {
      */
     private String errorMessage;
     
+    /**
+     * 默认构造函数
+     */
+    public QueryResponse() {
+    }
+    
+    /**
+     * 构造函数
+     * @param success 是否成功
+     * @param isQueryResult 是否为查询结果
+     * @param affectedRows 受影响的行数
+     */
+    public QueryResponse(boolean success, boolean isQueryResult, int affectedRows) {
+        this.success = success;
+        this.isQueryResult = isQueryResult;
+        this.affectedRows = affectedRows;
+    }
+    
     // Getters and Setters
     
     public boolean isQueryResult() {

@@ -35,6 +35,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
             .antMatchers("/auth/**").permitAll()
                 .antMatchers("/health/**").permitAll()
             .antMatchers("/connection/test").permitAll()
+            .antMatchers("/table-data/**").permitAll()
+            .antMatchers("/api/connection/**").permitAll()
             .anyRequest().authenticated();
         
         // 添加JWT过滤器

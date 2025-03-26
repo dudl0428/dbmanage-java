@@ -100,4 +100,14 @@ public class AuthController extends BaseController {
         
         return success("登录成功", authResponse);
     }
+
+    /**
+     * 退出登录
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<String>> logoutUser() {
+        //清除token
+        SecurityContextHolder.clearContext();
+        return success("退出成功", "退出成功");
+    }
 } 

@@ -22,6 +22,16 @@ public interface QueryService {
     QueryResponse executeQuery(QueryRequest request);
     
     /**
+     * 执行SQL更新操作（INSERT、UPDATE、DELETE等）
+     * 
+     * @param connectionId 数据库连接ID
+     * @param sql SQL语句
+     * @param params SQL参数
+     * @return 更新结果，包含影响的行数等信息
+     */
+    Map<String, Object> executeUpdate(Long connectionId, String sql, Object[] params);
+    
+    /**
      * 获取数据库结构信息
      * 
      * @param connectionId 数据库连接ID
@@ -37,6 +47,28 @@ public interface QueryService {
      * @return 表结构信息
      */
     List<Map<String, Object>> getTableStructure(Long connectionId, String tableName);
+    
+    /**
+     * 执行带分页的SQL查询
+     * 
+     * @param connectionId 数据库连接ID
+     * @param database 数据库名称
+     * @param sql SQL语句
+     * @param offset 偏移量
+     * @param limit 每页记录数
+     * @return 查询结果，包含分页信息
+     */
+    Map<String, Object> executeQueryWithPagination(Long connectionId, String database, String sql, int offset, int limit);
+    
+    /**
+     * 执行一般SQL查询
+     * 
+     * @param connectionId 数据库连接ID
+     * @param database 数据库名称
+     * @param sql SQL语句
+     * @return 查询结果
+     */
+    Map<String, Object> executeGenericQuery(Long connectionId, String database, String sql);
     
     /**
      * 保存查询
